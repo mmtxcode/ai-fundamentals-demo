@@ -16,8 +16,28 @@ if [ "$PY_VERSION" != "True" ]; then
     exit 1
 fi
 
+# ── Ensure python3-venv is available (Debian/Ubuntu systems) ─────────────────
+if ! "$PYTHON" -m venv --help > /dev/null 2>&1; then
+    echo "Python venv module not found. Attempting to install..."
+    if command -v apt > /dev/null 2>&1; then
+        PY_VER=$("$PYTHON" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        sudo apt install -y "python${PY_VER}-venv"
+    else
+        echo "Error: python venv module is missing and could not be installed automatically."
+        echo "Please install it manually and re-run this script."
+        exit 1
+    fi
+fi
+
 # ── Create virtual environment if needed ─────────────────────────────────────
-if [ ! -d "$VENV_DIR" ]; then
+# Check for the activate script specifically — a missing activate means the
+# venv directory exists but was created in a previous failed attempt.
+if [ ! -f "$VENV_DIR/bin/activate" ]; then
+    # Clean up any broken partial venv before retrying
+    if [ -d "$VENV_DIR" ]; then
+        echo "Removing incomplete virtual environment..."
+        rm -rf "$VENV_DIR"
+    fi
     echo "Creating virtual environment..."
     "$PYTHON" -m venv "$VENV_DIR"
 fi
