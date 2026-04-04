@@ -1299,6 +1299,9 @@ def main():
     console.print(render_concept_legend())
     console.print()
 
+    # Initialise GPU monitor first — needed to detect VRAM for model tier selection
+    gpu = GPUMonitor()
+
     # Select the right demo model set based on detected VRAM
     demo_models, demo_label = _select_demo_models(gpu)
 
@@ -1320,7 +1323,6 @@ def main():
         console.print()
 
     model, num_ctx = pick_model()
-    gpu = GPUMonitor()
 
     if gpu.available:
         console.print(f"[green]GPU monitoring:[/] {gpu.gpu_name} ({gpu.total_mem_gb:.1f} GB)")
