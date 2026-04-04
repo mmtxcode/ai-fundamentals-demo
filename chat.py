@@ -1036,53 +1036,88 @@ SUGGESTED_MODELS = [
     ("mistral",      "~4.1 GB  — fast, good instruction following"),
 ]
 
-# Recommended set for the /compare demo — same family, different sizes
-# so parameter count is the isolated variable
-DEMO_MODELS: list[tuple[str, str, str]] = [
-    ("llama3.2:1b",  "~700 MB", "1B params — baseline speed, minimal VRAM"),
-    ("llama3.2:3b",  "~2 GB",   "3B params — quality step up, still fast"),
-    ("llama3.1:8b",  "~4.7 GB", "8B params — strongest reasoning, highest VRAM"),
+# ── Demo model sets — chosen based on available VRAM ─────────────────────────
+#
+# STANDARD (< 24 GB VRAM / Apple Silicon / CPU)
+#   Same Llama 3 family at three sizes — isolates parameter count as the variable.
+#
+# HIGH-END (>= 24 GB VRAM, e.g. L40S / A100 / H100)
+#   8B vs 70B (same family, dramatic size gap) + Qwen 72B (different architecture)
+#   to show that model family also matters at the same parameter scale.
+
+DEMO_MODELS_STANDARD: list[tuple[str, str, str]] = [
+    ("llama3.2:1b", "~700 MB", "1B params — baseline speed, minimal VRAM"),
+    ("llama3.2:3b", "~2 GB",   "3B params — quality step up, still fast"),
+    ("llama3.1:8b", "~4.7 GB", "8B params — strongest reasoning, highest VRAM"),
 ]
 
+DEMO_MODELS_HIGH_END: list[tuple[str, str, str]] = [
+    ("llama3.1:8b",   "~4.7 GB", "8B params — fast baseline, barely touches L40S bandwidth"),
+    ("llama3.1:70b",  "~40 GB",  "70B params — same family, saturates VRAM bandwidth"),
+    ("qwen2.5:72b",   "~44 GB",  "72B params — different architecture, compare tok/s at same scale"),
+]
 
-def pull_demo_models():
-    """Pull the three recommended demo models, skipping any already installed."""
+# VRAM threshold (GB) for switching to the high-end set
+_HIGH_END_VRAM_GB = 24
+
+
+def _select_demo_models(gpu: "GPUMonitor") -> tuple[list[tuple[str, str, str]], str]:
+    """Return the appropriate demo model set and a label based on detected VRAM."""
+    vram = gpu.total_mem_gb if gpu.available else 0
+    if vram >= _HIGH_END_VRAM_GB:
+        return DEMO_MODELS_HIGH_END, f"High-End GPU ({vram:.0f} GB VRAM detected)"
+    return DEMO_MODELS_STANDARD, "Standard (< 24 GB VRAM / Apple Silicon / CPU)"
+
+
+# Keep a single alias used by the rest of the code — resolved at runtime via _select_demo_models
+DEMO_MODELS = DEMO_MODELS_STANDARD  # default; overridden after GPU detection
+
+
+def pull_demo_models(
+    models: list[tuple[str, str, str]] | None = None,
+    label: str = "",
+):
+    """Pull the recommended demo models for the detected hardware, skipping any already installed."""
+    if models is None:
+        models = DEMO_MODELS
     installed = set(list_models())
 
-    to_pull = [
-        (name, size, desc)
-        for name, size, desc in DEMO_MODELS
-        if name not in installed
-    ]
+    to_pull = [(n, s, d) for n, s, d in models if n not in installed]
 
     if not to_pull:
         console.print("[green]All demo models are already installed.[/]")
         return
 
-    console.print()
-    console.print(Panel(
-        "[bold white]Demo Model Set[/]\n\n"
+    tier_note = (
+        "These models span 8B → 70B+ parameters across two architectures —\n"
+        "designed to saturate high-VRAM GPUs and show clear throughput differences."
+        if models is DEMO_MODELS_HIGH_END else
         "These three models are the same architecture (Llama 3) at different sizes.\n"
         "Keeping architecture constant lets you isolate the effect of parameter count\n"
-        "on speed, VRAM, and quality — the core infrastructure tradeoff.",
+        "on speed, VRAM, and quality — the core infrastructure tradeoff."
+    )
+
+    console.print()
+    console.print(Panel(
+        f"[bold white]Demo Model Set[/]  [dim]{label}[/]\n\n" + tier_note,
         border_style="bright_blue",
         padding=(0, 2),
     ))
     console.print()
 
-    for name, size, desc in DEMO_MODELS:
+    for name, size, desc in models:
         if name in installed:
             console.print(f"  [green]✓[/] [bold]{name}[/]  [dim]{size} — already installed[/]")
         else:
             console.print(f"  [yellow]↓[/] [bold]{name}[/]  [dim]{size} — {desc}[/]")
 
     console.print()
-    total_gb = sum(
-        float(size.replace("~", "").replace(" GB", "").replace(" MB", "e-3"))
-        for name, size, _ in to_pull
+    gb_to_pull = sum(
+        float(s.replace("~", "").replace(" GB", ""))
+        for _, s, _ in to_pull if "GB" in s
     )
     confirm = Prompt.ask(
-        f"Pull {len(to_pull)} model(s)? (~{sum(float(s.replace('~','').replace(' GB','').replace(' MB','')) for _, s, _ in to_pull if 'GB' in s):.1f} GB download)",
+        f"Pull {len(to_pull)} model(s)? (~{gb_to_pull:.1f} GB download)",
         choices=["y", "n"],
         default="y",
     )
@@ -1264,12 +1299,16 @@ def main():
     console.print(render_concept_legend())
     console.print()
 
+    # Select the right demo model set based on detected VRAM
+    demo_models, demo_label = _select_demo_models(gpu)
+
     # Offer to pull the recommended demo model set if any are missing
     installed = set(list_models())
-    missing_demo = [name for name, _, _ in DEMO_MODELS if name not in installed]
+    missing_demo = [name for name, _, _ in demo_models if name not in installed]
     if missing_demo:
         console.print(Panel(
             f"[yellow]{len(missing_demo)} of the 3 recommended demo models are not installed.[/]\n"
+            f"Tier: [bold]{demo_label}[/]\n"
             "Pulling them enables the [bold]/compare[/] command to show clear size vs speed tradeoffs.\n\n"
             f"Missing: [bold]{', '.join(missing_demo)}[/]",
             border_style="yellow",
@@ -1277,7 +1316,7 @@ def main():
         ))
         setup = Prompt.ask("Pull recommended demo models now?", choices=["y", "n"], default="y")
         if setup == "y":
-            pull_demo_models()
+            pull_demo_models(demo_models, demo_label)
         console.print()
 
     model, num_ctx = pick_model()
@@ -1336,7 +1375,8 @@ def main():
             continue
 
         if cmd == "/setup":
-            pull_demo_models()
+            _models, _label = _select_demo_models(gpu)
+            pull_demo_models(_models, _label)
             continue
 
         if cmd == "/model":
