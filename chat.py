@@ -11,8 +11,6 @@ Run:  ./run.sh          (macOS / Linux — sets up venv automatically)
 """
 
 import sys
-import os
-import asyncio
 import platform
 import subprocess
 import time
@@ -141,92 +139,6 @@ def ensure_ollama():
 
     console.print("[red]Timed out waiting for Ollama to start.[/]")
     sys.exit(1)
-
-
-# ── MCP Client ───────────────────────────────────────────────────────────────
-
-class MCPClient:
-    """
-    Connects to the Intersight MCP server process and bridges its tools
-    to Ollama's function-calling format.
-
-    Why this matters for the demo:
-      Without tools the model answers from training data — it may hallucinate
-      server counts, firmware versions, or alarm states. With tools it calls
-      the live Intersight API and grounds its answer in real infrastructure data.
-      The difference is visible: tool calls appear inline before the response.
-    """
-
-    MCP_SERVER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "intersight_mcp.py")
-
-    def __init__(self):
-        self.tools: list[dict] = []   # Ollama function-calling format
-        self.available = False
-        self.error = ""
-
-    def setup(self) -> bool:
-        """Spawn the MCP server, fetch its tool list, convert to Ollama format."""
-        try:
-            self.tools = asyncio.run(self._fetch_tools())
-            self.available = bool(self.tools)
-            return self.available
-        except Exception as e:
-            self.error = str(e)
-            self.available = False
-            return False
-
-    def call(self, name: str, arguments: dict) -> str:
-        """Call a single MCP tool and return its text result."""
-        try:
-            return asyncio.run(self._call_tool(name, arguments))
-        except Exception as e:
-            return f"Tool error: {e}"
-
-    # ── Async internals ───────────────────────────────────────────────────────
-
-    async def _fetch_tools(self) -> list[dict]:
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=[self.MCP_SERVER],
-            env={**os.environ},
-        )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.list_tools()
-                return [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": t.name,
-                            "description": t.description or "",
-                            "parameters": t.inputSchema or {
-                                "type": "object", "properties": {}
-                            },
-                        },
-                    }
-                    for t in result.tools
-                ]
-
-    async def _call_tool(self, name: str, arguments: dict) -> str:
-        from mcp import ClientSession, StdioServerParameters
-        from mcp.client.stdio import stdio_client
-
-        params = StdioServerParameters(
-            command=sys.executable,
-            args=[self.MCP_SERVER],
-            env={**os.environ},
-        )
-        async with stdio_client(params) as (read, write):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool(name, arguments)
-                return "\n".join(
-                    c.text for c in result.content if hasattr(c, "text")
-                )
 
 
 # ── GPU Monitoring ────────────────────────────────────────────────────────────
@@ -748,7 +660,6 @@ def render_help() -> Panel:
         "[bold]/concepts[/]       Show the metric concept reference card",
         "[bold]/setup[/]           Pull the recommended demo models (llama3.2:1b, 3b, llama3.1:8b)",
         "[bold]/compare[/]        Run the same prompt across multiple models and compare metrics",
-        "[bold]/tools[/]           Toggle Intersight MCP tools on/off",
         "[bold]/quit[/]           Exit",
         "",
         "[dim]Any other input is sent to the model.[/]",
@@ -1373,171 +1284,6 @@ def chat_turn(
     return "".join(response_chunks), m
 
 
-def chat_turn_with_tools(
-    model: str,
-    messages: list[dict],
-    num_ctx: int,
-    gpu: GPUMonitor,
-    turn: int,
-    mcp: MCPClient,
-) -> tuple[str, InferenceMetrics, list[dict]]:
-    """
-    Tool-aware chat turn. Flow:
-      1. Send to Ollama with tools — non-streaming so it can decide to call tools
-      2. If tool calls returned: execute each via MCP, show inline, loop back
-      3. Stream the final response once tools are satisfied
-    Returns (response_text, metrics, tool_call_log).
-
-    This shows the 'model knows vs tool needed' distinction:
-      - "What is Intersight?" → answers from training, no tool call
-      - "How many servers do we have?" → calls get_environment_summary()
-    """
-    m = InferenceMetrics()
-    tool_call_log: list[dict] = []
-
-    gpu.start()
-    m.t_request = time.perf_counter()
-
-    console.print()
-    console.print(Rule(f"[dim]turn {turn}[/]"))
-
-    # Prepend a system message that instructs the model to use tools for live
-    # infrastructure questions. Without this, local models often answer from
-    # training data instead of calling the available Intersight tools.
-    tool_names = ", ".join(
-        t["function"]["name"] for t in mcp.tools[:10]
-    ) + (" …and more" if len(mcp.tools) > 10 else "")
-    system_msg = {
-        "role": "system",
-        "content": (
-            "You are an infrastructure assistant with live access to Cisco Intersight "
-            "via tool calls. ALWAYS use the provided tools to answer questions about "
-            "servers, alarms, firmware, policies, fabric, hardware inventory, or any "
-            "real-time infrastructure state. Do NOT answer those questions from training "
-            "data — the tools return current live data from the environment.\n\n"
-            f"Available tools include: {tool_names}.\n\n"
-            "Examples of questions that MUST use a tool:\n"
-            "- How many servers do we have? → call list_compute_servers or get_environment_summary\n"
-            "- Any active alarms? → call list_alarms\n"
-            "- What firmware version is running? → call get_firmware_summary\n"
-            "- List the UCS domains → call list_fabric_interconnects\n\n"
-            "Only answer from training data for conceptual questions like "
-            "'What is Intersight?' or 'How does UCS work?'"
-        ),
-    }
-    messages_with_system = [system_msg] + messages
-
-    try:
-        # ── Phase 1: let the model decide if it needs tools ───────────────────
-        response = ollama.chat(
-            model=model,
-            messages=messages_with_system,
-            tools=mcp.tools,
-            options={"num_ctx": num_ctx},
-            stream=False,
-        )
-
-        # ── Phase 2: execute tool calls if any ───────────────────────────────
-        tool_messages = []
-        if response.message.tool_calls:
-            for tc in response.message.tool_calls:
-                fn = tc.function
-                args = fn.arguments if isinstance(fn.arguments, dict) else {}
-
-                console.print(
-                    f"[bold magenta]⚙ Tool call:[/] [cyan]{fn.name}[/]"
-                    + (f"  [dim]{args}[/]" if args else "")
-                )
-
-                t_tool_start = time.perf_counter()
-                result = mcp.call(fn.name, args)
-                t_tool_end = time.perf_counter()
-
-                tool_call_log.append({
-                    "name": fn.name,
-                    "args": args,
-                    "duration": t_tool_end - t_tool_start,
-                    "result_preview": result[:120] + "…" if len(result) > 120 else result,
-                })
-
-                console.print(f"[dim]  → {result[:200]}{'…' if len(result) > 200 else ''}[/]")
-                console.print()
-
-                tool_messages.append({
-                    "role": "tool",
-                    "content": result,
-                })
-
-            # Add assistant's tool-call message + results to context
-            messages_with_system = messages_with_system + [
-                {"role": "assistant", "content": response.message.content or "",
-                 "tool_calls": response.message.tool_calls}
-            ] + tool_messages
-
-        # ── Phase 3: stream the final response ────────────────────────────────
-        console.print(f"[bold cyan]Assistant:[/] ", end="")
-        response_chunks: list[str] = []
-
-        stream = ollama.chat(
-            model=model,
-            messages=messages_with_system,
-            options={"num_ctx": num_ctx},
-            stream=True,
-        )
-
-        for chunk in stream:
-            content = chunk.get("message", {}).get("content", "")
-            if content:
-                if not m.first_token_received:
-                    m.t_first_token = time.perf_counter()
-                    m.first_token_received = True
-                response_chunks.append(content)
-                console.print(content, end="", highlight=False)
-            if chunk.get("done"):
-                m.t_done = time.perf_counter()
-                m.prompt_tokens = chunk.get("prompt_eval_count", 0)
-                m.output_tokens = chunk.get("eval_count", 0)
-                m.prompt_eval_ns = chunk.get("prompt_eval_duration", 0)
-                m.eval_ns = chunk.get("eval_duration", 0)
-                m.total_ns = chunk.get("total_duration", 0)
-                m.load_ns = chunk.get("load_duration", 0)
-
-    except KeyboardInterrupt:
-        m.t_done = time.perf_counter()
-        console.print("\n[yellow][interrupted][/]")
-    except Exception as e:
-        m.t_done = time.perf_counter()
-        console.print(f"\n[red]Error: {e}[/]")
-
-    gpu.stop()
-    console.print()
-
-    return "".join(response_chunks), m, tool_call_log
-
-
-def render_tool_call_panel(tool_calls: list[dict]) -> Panel:
-    """Shows which tools were called, their arguments, timing, and result preview."""
-    table = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
-    table.add_column("", style="bold magenta", width=20)
-    table.add_column("", style="white")
-
-    for i, tc in enumerate(tool_calls, 1):
-        table.add_row(f"  Tool {i}", f"[bold cyan]{tc['name']}[/]")
-        if tc["args"]:
-            table.add_row("  Args", f"[dim]{tc['args']}[/]")
-        table.add_row("  Time", f"{tc['duration']:.2f}s  [dim](Intersight API round-trip)[/]")
-        table.add_row("  Result", f"[dim]{tc['result_preview']}[/]")
-        if i < len(tool_calls):
-            table.add_row("", "")
-
-    return Panel(
-        table,
-        title="[bold white] MCP Tool Calls — live Intersight data [/]",
-        border_style="magenta",
-        padding=(0, 1),
-    )
-
-
 def main():
     ensure_ollama()
     console.clear()
@@ -1587,19 +1333,6 @@ def main():
     console.print(f"[dim]Type /help for commands.[/]")
     console.print()
 
-    # ── MCP / Intersight tools ────────────────────────────────────────────────
-    mcp_client = MCPClient()
-    tools_enabled = False
-
-    if os.path.exists(".env") or os.environ.get("INTERSIGHT_API_KEY_ID"):
-        console.print("[dim]Intersight credentials detected. Use [bold]/tools[/] to enable MCP tool calling.[/]")
-    else:
-        console.print(
-            "[dim]No Intersight credentials found. "
-            "Copy [bold].env.example[/] to [bold].env[/] to enable MCP tools.[/]"
-        )
-    console.print()
-
     messages: list[dict] = []
     turn = 0
     total_ctx_tokens = 0
@@ -1609,8 +1342,7 @@ def main():
 
     while True:
         try:
-            prompt_label = "[bold green]Prompt[/] [magenta][tools][/]" if tools_enabled else "[bold green]Prompt[/]"
-            user_input = Prompt.ask(prompt_label)
+            user_input = Prompt.ask("[bold green]Prompt[/]")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Goodbye.[/]")
             break
@@ -1647,33 +1379,6 @@ def main():
         if cmd == "/setup":
             _models, _label = _select_demo_models(gpu)
             pull_demo_models(_models, _label)
-            continue
-
-        if cmd == "/tools":
-            if tools_enabled:
-                tools_enabled = False
-                console.print("[yellow]MCP tools disabled.[/] Responses use model training data only.")
-            else:
-                console.print("[dim]Connecting to Intersight MCP server...[/]")
-                if mcp_client.setup():
-                    tools_enabled = True
-                    tool_names = [t["function"]["name"] for t in mcp_client.tools]
-                    console.print(Panel(
-                        "[green]MCP tools enabled.[/] The model can now call live Intersight data.\n\n"
-                        f"Available tools: [cyan]{', '.join(tool_names)}[/]\n\n"
-                        "[dim]Try asking:\n"
-                        "  • 'How many servers do we have?' — needs a tool\n"
-                        "  • 'Are there any critical alarms?' — needs a tool\n"
-                        "  • 'What is Intersight?' — model answers from training data, no tool needed[/]",
-                        border_style="magenta",
-                        padding=(0, 2),
-                    ))
-                else:
-                    console.print(
-                        f"[red]Failed to connect to Intersight MCP server.[/]\n"
-                        f"[dim]{mcp_client.error}[/]\n\n"
-                        "Check that [bold].env[/] exists with valid Intersight credentials."
-                    )
             continue
 
         if cmd == "/model":
@@ -1720,15 +1425,7 @@ def main():
         # prior turns — not a word-count estimate.
         prev_context_tokens = true_context_tokens
 
-        if tools_enabled and mcp_client.available:
-            response, metrics, tool_calls = chat_turn_with_tools(
-                model, messages, num_ctx, gpu, turn, mcp_client
-            )
-            if tool_calls:
-                console.print(render_tool_call_panel(tool_calls))
-        else:
-            response, metrics = chat_turn(model, messages, num_ctx, gpu, turn)
-            tool_calls = []
+        response, metrics = chat_turn(model, messages, num_ctx, gpu, turn)
 
         if response:
             messages.append({"role": "assistant", "content": response})
