@@ -57,14 +57,43 @@ mcp = FastMCP(
 
 # ── Authentication ────────────────────────────────────────────────────────────
 
+def _fetch_oauth_token(base_url: str, client_id: str, client_secret: str) -> str:
+    """
+    Exchange an OAuth2 Client ID + Client Secret for a bearer token using
+    the Intersight token endpoint (client_credentials grant).
+    """
+    import urllib.request, urllib.parse, json as _json
+    token_url = f"{base_url.rstrip('/')}/iam/token"
+    payload   = urllib.parse.urlencode({
+        "grant_type":    "client_credentials",
+        "client_id":     client_id,
+        "client_secret": client_secret,
+    }).encode()
+    req = urllib.request.Request(
+        token_url, data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = _json.loads(resp.read())
+    token = data.get("access_token") or data.get("token")
+    if not token:
+        raise RuntimeError(f"OAuth2 token response missing access_token: {data}")
+    return token
+
+
 def _get_client():
     """
     Build an authenticated Intersight ApiClient from environment variables.
 
-    OAuth2 (preferred — set one of):
+    OAuth2 — Client Credentials (recommended):
+      INTERSIGHT_CLIENT_ID           — OAuth2 Client ID
+      INTERSIGHT_CLIENT_SECRET       — OAuth2 Client Secret
+
+    OAuth2 — pre-fetched token (alternative):
       INTERSIGHT_OAUTH_TOKEN         — bearer token string
 
-    HTTP Signature (alternative — set both):
+    HTTP Signature (legacy):
       INTERSIGHT_API_KEY_ID          — API key ID from Intersight Settings → API Keys
       INTERSIGHT_API_SECRET_KEY_FILE — path to private key PEM file
         OR
@@ -76,10 +105,19 @@ def _get_client():
     import intersight
     from intersight.api_client import ApiClient
 
-    base_url    = os.environ.get("INTERSIGHT_BASE_URL", "https://intersight.com").strip()
-    oauth_token = os.environ.get("INTERSIGHT_OAUTH_TOKEN", "").strip()
+    base_url      = os.environ.get("INTERSIGHT_BASE_URL", "https://intersight.com").strip()
+    client_id     = os.environ.get("INTERSIGHT_CLIENT_ID", "").strip()
+    client_secret = os.environ.get("INTERSIGHT_CLIENT_SECRET", "").strip()
+    oauth_token   = os.environ.get("INTERSIGHT_OAUTH_TOKEN", "").strip()
 
-    # ── OAuth2 bearer token path ──────────────────────────────────────────────
+    # ── OAuth2 client credentials (exchange ID+Secret → token) ───────────────
+    if client_id and client_secret:
+        token = _fetch_oauth_token(base_url, client_id, client_secret)
+        config = intersight.Configuration(host=base_url)
+        config.access_token = token
+        return ApiClient(config)
+
+    # ── OAuth2 pre-fetched bearer token ───────────────────────────────────────
     if oauth_token:
         config = intersight.Configuration(host=base_url)
         config.access_token = oauth_token
@@ -92,8 +130,9 @@ def _get_client():
 
     if not key_id:
         raise RuntimeError(
-            "No Intersight credentials found. Set INTERSIGHT_OAUTH_TOKEN for OAuth2, "
-            "or INTERSIGHT_API_KEY_ID + INTERSIGHT_API_SECRET_KEY_FILE for HTTP Signature."
+            "No Intersight credentials found. Set INTERSIGHT_CLIENT_ID + "
+            "INTERSIGHT_CLIENT_SECRET for OAuth2, or INTERSIGHT_API_KEY_ID + "
+            "INTERSIGHT_API_SECRET_KEY_FILE for HTTP Signature auth."
         )
     if not key_file and not key_str:
         raise RuntimeError(
