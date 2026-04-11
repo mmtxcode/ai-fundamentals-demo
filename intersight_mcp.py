@@ -204,80 +204,60 @@ def _coerce_top(v: Any, default: int = 50) -> int:
             return int(s)
     return default
 
+_AUTH = ["cookieAuth", "http_signature", "oAuth2", "oAuth2"]
+
+def _call(client, method: str, url: str, query_params=None, body=None) -> dict:
+    """
+    Call the Intersight API and return a parsed dict.
+    Uses _preload_content=False + manual JSON parsing to avoid the SDK's
+    response deserializer (which fails with response_type="object" in some
+    SDK versions, producing 'Unsupported type: o').
+    """
+    import json as _json
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+
+    resp = client.call_api(
+        url, method,
+        path_params={}, query_params=query_params or [],
+        header_params=headers,
+        body=body, post_params=[], files={},
+        response_type=None,
+        auth_settings=_AUTH,
+        async_req=False, _return_http_data_only=False,
+        collection_formats={}, _preload_content=False, _request_timeout=30,
+    )
+    # resp is (data, status_code, headers) when _return_http_data_only=False
+    raw = resp[0] if isinstance(resp, tuple) else resp
+    data = raw.data if hasattr(raw, "data") else raw.read()
+    return _json.loads(data) if data else {}
+
+
 def _get(path: str, filter_str: Any = None, top: Any = None, select: Any = None) -> dict:
     filter_str = _coerce_filter(filter_str)
     top        = _coerce_top(top, 50)
     select     = _coerce_filter(select)
-    client = _get_client()
     params = [("$top", str(top))]
     if filter_str: params.append(("$filter", filter_str))
     if select:     params.append(("$select", select))
-    return client.call_api(
-        f"/api/v1/{path}", "GET",
-        path_params={}, query_params=params,
-        header_params={"Accept": "application/json"},
-        body=None, post_params=[], files={},
-        response_type="object",
-        auth_settings=["cookieAuth", "http_signature", "oAuth2", "oAuth2"],
-        async_req=False, _return_http_data_only=True,
-        collection_formats={}, _preload_content=True, _request_timeout=30,
-    )
+    return _call(_get_client(), "GET", f"/api/v1/{path}", query_params=params)
 
 
 def _get_by_moid(path: str, moid: str) -> dict:
-    client = _get_client()
-    return client.call_api(
-        f"/api/v1/{path}/{moid}", "GET",
-        path_params={}, query_params=[],
-        header_params={"Accept": "application/json"},
-        body=None, post_params=[], files={},
-        response_type="object",
-        auth_settings=["cookieAuth", "http_signature", "oAuth2", "oAuth2"],
-        async_req=False, _return_http_data_only=True,
-        collection_formats={}, _preload_content=True, _request_timeout=30,
-    )
+    return _call(_get_client(), "GET", f"/api/v1/{path}/{moid}")
 
 
 def _post(path: str, body: dict) -> dict:
-    client = _get_client()
-    return client.call_api(
-        f"/api/v1/{path}", "POST",
-        path_params={}, query_params=[],
-        header_params={"Accept": "application/json", "Content-Type": "application/json"},
-        body=body, post_params=[], files={},
-        response_type="object",
-        auth_settings=["cookieAuth", "http_signature", "oAuth2", "oAuth2"],
-        async_req=False, _return_http_data_only=True,
-        collection_formats={}, _preload_content=True, _request_timeout=30,
-    )
+    return _call(_get_client(), "POST", f"/api/v1/{path}", body=body)
 
 
 def _patch(path: str, moid: str, body: dict) -> dict:
-    client = _get_client()
-    return client.call_api(
-        f"/api/v1/{path}/{moid}", "PATCH",
-        path_params={}, query_params=[],
-        header_params={"Accept": "application/json", "Content-Type": "application/json"},
-        body=body, post_params=[], files={},
-        response_type="object",
-        auth_settings=["cookieAuth", "http_signature", "oAuth2", "oAuth2"],
-        async_req=False, _return_http_data_only=True,
-        collection_formats={}, _preload_content=True, _request_timeout=30,
-    )
+    return _call(_get_client(), "PATCH", f"/api/v1/{path}/{moid}", body=body)
 
 
 def _delete(path: str, moid: str) -> dict:
-    client = _get_client()
-    return client.call_api(
-        f"/api/v1/{path}/{moid}", "DELETE",
-        path_params={}, query_params=[],
-        header_params={"Accept": "application/json"},
-        body=None, post_params=[], files={},
-        response_type="object",
-        auth_settings=["cookieAuth", "http_signature", "oAuth2", "oAuth2"],
-        async_req=False, _return_http_data_only=True,
-        collection_formats={}, _preload_content=True, _request_timeout=30,
-    )
+    return _call(_get_client(), "DELETE", f"/api/v1/{path}/{moid}")
 
 
 # ── Formatting helpers ────────────────────────────────────────────────────────
