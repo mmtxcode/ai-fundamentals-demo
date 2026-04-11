@@ -1401,11 +1401,37 @@ def chat_turn_with_tools(
     console.print()
     console.print(Rule(f"[dim]turn {turn}[/]"))
 
+    # Prepend a system message that instructs the model to use tools for live
+    # infrastructure questions. Without this, local models often answer from
+    # training data instead of calling the available Intersight tools.
+    tool_names = ", ".join(
+        t["function"]["name"] for t in mcp.tools[:10]
+    ) + (" …and more" if len(mcp.tools) > 10 else "")
+    system_msg = {
+        "role": "system",
+        "content": (
+            "You are an infrastructure assistant with live access to Cisco Intersight "
+            "via tool calls. ALWAYS use the provided tools to answer questions about "
+            "servers, alarms, firmware, policies, fabric, hardware inventory, or any "
+            "real-time infrastructure state. Do NOT answer those questions from training "
+            "data — the tools return current live data from the environment.\n\n"
+            f"Available tools include: {tool_names}.\n\n"
+            "Examples of questions that MUST use a tool:\n"
+            "- How many servers do we have? → call list_compute_servers or get_environment_summary\n"
+            "- Any active alarms? → call list_alarms\n"
+            "- What firmware version is running? → call get_firmware_summary\n"
+            "- List the UCS domains → call list_fabric_interconnects\n\n"
+            "Only answer from training data for conceptual questions like "
+            "'What is Intersight?' or 'How does UCS work?'"
+        ),
+    }
+    messages_with_system = [system_msg] + messages
+
     try:
         # ── Phase 1: let the model decide if it needs tools ───────────────────
         response = ollama.chat(
             model=model,
-            messages=messages,
+            messages=messages_with_system,
             tools=mcp.tools,
             options={"num_ctx": num_ctx},
             stream=False,
@@ -1443,7 +1469,7 @@ def chat_turn_with_tools(
                 })
 
             # Add assistant's tool-call message + results to context
-            messages = messages + [
+            messages_with_system = messages_with_system + [
                 {"role": "assistant", "content": response.message.content or "",
                  "tool_calls": response.message.tool_calls}
             ] + tool_messages
@@ -1454,7 +1480,7 @@ def chat_turn_with_tools(
 
         stream = ollama.chat(
             model=model,
-            messages=messages,
+            messages=messages_with_system,
             options={"num_ctx": num_ctx},
             stream=True,
         )
