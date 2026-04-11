@@ -135,13 +135,52 @@ To enable NVIDIA GPU monitoring uncomment `pynvml` in `requirements.txt` and re-
 
 ---
 
+## Cisco Intersight Integration (MCP)
+
+The demo includes an MCP server (`intersight_mcp.py`) that connects to Cisco Intersight, letting the model call real infrastructure tools during a conversation. This demonstrates the difference between what a model *knows* (training data) and what it can *do* (live tool access).
+
+### Setup
+
+Create a `.env` file in the project root (see `.env.example`):
+
+```bash
+INTERSIGHT_API_KEY_ID=your_key_id_here
+INTERSIGHT_API_SECRET_KEY_FILE=~/.intersight/private-key.pem
+INTERSIGHT_BASE_URL=https://intersight.com
+```
+
+Toggle tools on/off during chat with the `/tools` command.
+
+### Tool Modes
+
+Two modes control how many Intersight tools are registered:
+
+| Mode | Tools | How to enable |
+|---|---|---|
+| **Core** (default) | 66 read-only tools | `INTERSIGHT_TOOL_MODE=core` (or unset) |
+| **All** | 198 tools (core + CRUD) | `INTERSIGHT_TOOL_MODE=all` |
+
+Set the mode in your `.env` file or as an environment variable before launching:
+
+```bash
+INTERSIGHT_TOOL_MODE=all ./run.sh
+```
+
+**Core mode** includes read-only queries across Inventory, Alarms, Policies, Pools, Telemetry, Network/Fabric, Hardware/Firmware, Workflows, and Security. Good for demos where you want to show live data retrieval without write risk.
+
+**All mode** adds full CRUD operations: create/update/delete for policies, pools, fabric configurations, server profiles, vNICs, and more. Use this when demonstrating end-to-end automation.
+
+---
+
 ## Project Structure
 
 ```
 ai-fundamentals-demo/
-├── chat.py           # Main application
-├── requirements.txt  # Python dependencies
-├── run.sh            # macOS / Linux launcher
-├── run.bat           # Windows launcher
+├── chat.py              # Main application
+├── intersight_mcp.py    # Cisco Intersight MCP server
+├── requirements.txt     # Python dependencies
+├── run.sh               # macOS / Linux launcher
+├── run.bat              # Windows launcher
+├── .env.example         # Intersight credentials template
 └── .gitignore
 ```
