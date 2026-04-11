@@ -182,18 +182,26 @@ def _get_client():
 
 # ── Generic request helpers ───────────────────────────────────────────────────
 
+# Strings the LLM sends when it has no value for an optional parameter.
+_EMPTY_PLACEHOLDERS = frozenset(("{}", "[]", "null", "none", "undefined", "n/a", "''", '""'))
+
 def _coerce_filter(v: Any) -> str:
-    """Accept str, None, or anything the LLM sends (e.g. {}) — always return a str."""
-    if isinstance(v, str):
-        return v.strip()
-    return ""
+    """Accept str, None, dict, or any LLM placeholder — always return a clean str."""
+    if not isinstance(v, str):
+        return ""
+    v = v.strip()
+    if v.lower() in _EMPTY_PLACEHOLDERS:
+        return ""
+    return v
 
 def _coerce_top(v: Any, default: int = 50) -> int:
-    """Accept int, str digit, None, or anything else — always return an int."""
+    """Accept int, str digit, None, or any LLM placeholder — always return an int."""
     if isinstance(v, int) and not isinstance(v, bool):
         return v
-    if isinstance(v, str) and v.strip().isdigit():
-        return int(v.strip())
+    if isinstance(v, str):
+        s = v.strip()
+        if s.isdigit():
+            return int(s)
     return default
 
 def _get(path: str, filter_str: Any = None, top: Any = None, select: Any = None) -> dict:
