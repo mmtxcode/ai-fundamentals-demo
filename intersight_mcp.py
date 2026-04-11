@@ -18,6 +18,7 @@ Setup
 
 import os
 import sys
+from typing import Optional
 
 # ── Dependency check ──────────────────────────────────────────────────────────
 
@@ -181,7 +182,10 @@ def _get_client():
 
 # ── Generic request helpers ───────────────────────────────────────────────────
 
-def _get(path: str, filter_str: str = "", top: int = 50, select: str = "") -> dict:
+def _get(path: str, filter_str: Optional[str] = None, top: Optional[int] = None, select: Optional[str] = None) -> dict:
+    filter_str = filter_str or ""
+    top        = top if top is not None else 50
+    select     = select or ""
     client = _get_client()
     params = [("$top", str(top))]
     if filter_str: params.append(("$filter", filter_str))
@@ -297,28 +301,28 @@ def _fmt_ok(data: dict) -> str:
 # ── Inventory & Discovery ─────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_compute_servers(filter: str = "", top: int = 50) -> str:
+def list_compute_servers(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all compute servers (blades and rack units) with optional OData filtering."""
     return _fmt_list(_get("compute/PhysicalSummaries", filter, top),
                      ["Name", "Model", "Serial", "OperPowerState", "Dn"], "server")
 
 
 @mcp.tool()
-def list_compute_blades(filter: str = "", top: int = 50) -> str:
+def list_compute_blades(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all blade servers in chassis."""
     return _fmt_list(_get("compute/Blades", filter, top),
                      ["Dn", "Model", "Serial", "OperState", "Presence"], "blade")
 
 
 @mcp.tool()
-def list_compute_rack_units(filter: str = "", top: int = 50) -> str:
+def list_compute_rack_units(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all rack-mounted servers."""
     return _fmt_list(_get("compute/RackUnits", filter, top),
                      ["Name", "Model", "Serial", "OperState", "ManagementIp"], "rack unit")
 
 
 @mcp.tool()
-def list_compute_boards(filter: str = "", top: int = 50) -> str:
+def list_compute_boards(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all server motherboards/compute boards."""
     return _fmt_list(_get("compute/Boards", filter, top),
                      ["Dn", "Model", "OperState", "Presence"], "compute board")
@@ -333,21 +337,21 @@ def get_server_details(moid: str) -> str:
 
 
 @mcp.tool()
-def list_chassis(filter: str = "", top: int = 50) -> str:
+def list_chassis(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all equipment chassis."""
     return _fmt_list(_get("equipment/Chasses", filter, top),
                      ["Name", "Model", "Serial", "OperState", "Presence"], "chassis")
 
 
 @mcp.tool()
-def list_fabric_interconnects(filter: str = "", top: int = 50) -> str:
+def list_fabric_interconnects(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all fabric interconnects and network elements."""
     return _fmt_list(_get("network/Elements", filter, top),
                      ["Dn", "Model", "Serial", "OperState", "OutOfBandIpAddress"], "fabric interconnect")
 
 
 @mcp.tool()
-def search_resources(resource_type: str, filter: str = "", top: int = 25) -> str:
+def search_resources(resource_type: str, filter: Optional[str] = None, top: Optional[int] =25) -> str:
     """Search for any Intersight resource by API type with optional OData filter. E.g. resource_type='compute/PhysicalSummaries'."""
     return _fmt_list(_get(resource_type, filter, top), ["Name", "Moid", "Dn", "Model"], "result")
 
@@ -355,7 +359,7 @@ def search_resources(resource_type: str, filter: str = "", top: int = 25) -> str
 # ── Alarms & Monitoring ───────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_alarms(severity: str = "", filter: str = "", top: int = 50) -> str:
+def list_alarms(severity: str = "", filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List active (unacknowledged) alarms. Optionally filter by severity: Critical, Warning, Info."""
     f = "Acknowledge eq 'None'"
     if severity: f += f" and Severity eq '{severity}'"
@@ -365,7 +369,7 @@ def list_alarms(severity: str = "", filter: str = "", top: int = 50) -> str:
 
 
 @mcp.tool()
-def list_tam_advisories(filter: str = "", top: int = 50) -> str:
+def list_tam_advisories(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List technical advisories and field notices affecting your infrastructure."""
     return _fmt_list(_get("tam/Advisories", filter, top),
                      ["Name", "Severity", "Description", "State"], "advisory")
@@ -382,7 +386,7 @@ def get_tam_advisory_count() -> str:
 # ── Policy Management ─────────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_policies(policy_type: str, filter: str = "", top: int = 50) -> str:
+def list_policies(policy_type: str, filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List policies of a specific type. E.g. policy_type='vnic/LanConnectivityPolicies'."""
     return _fmt_list(_get(policy_type, filter, top),
                      ["Name", "Description", "Moid"], "policy")
@@ -396,7 +400,7 @@ def get_policy(policy_type: str, moid: str) -> str:
 
 
 @mcp.tool()
-def list_server_profiles(filter: str = "", top: int = 50) -> str:
+def list_server_profiles(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all server profiles."""
     return _fmt_list(_get("server/Profiles", filter, top),
                      ["Name", "Description", "AssignedServer", "ConfigContext", "Moid"], "server profile")
@@ -410,21 +414,21 @@ def get_server_profile(moid: str) -> str:
 
 
 @mcp.tool()
-def list_bios_units(filter: str = "", top: int = 50) -> str:
+def list_bios_units(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all BIOS/UEFI firmware units."""
     return _fmt_list(_get("bios/Units", filter, top),
                      ["Dn", "Model", "InitSeq", "InitTs"], "BIOS unit")
 
 
 @mcp.tool()
-def list_boot_device_boot_modes(filter: str = "", top: int = 50) -> str:
+def list_boot_device_boot_modes(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all boot device boot modes."""
     return _fmt_list(_get("boot/DeviceBootModes", filter, top),
                      ["Dn", "ConfiguredBootMode", "LastConfiguredBootMode"], "boot mode")
 
 
 @mcp.tool()
-def list_adapter_config_policies(filter: str = "", top: int = 50) -> str:
+def list_adapter_config_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all Ethernet adapter configuration policies."""
     return _fmt_list(_get("adapter/ConfigPolicies", filter, top),
                      ["Name", "Description", "Moid"], "adapter config policy")
@@ -438,7 +442,7 @@ def get_adapter_config_policy(moid: str) -> str:
 
 
 @mcp.tool()
-def list_lan_connectivity_policies(filter: str = "", top: int = 50) -> str:
+def list_lan_connectivity_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all LAN connectivity policies."""
     return _fmt_list(_get("vnic/LanConnectivityPolicies", filter, top),
                      ["Name", "Description", "Moid"], "LAN connectivity policy")
@@ -452,7 +456,7 @@ def get_lan_connectivity_policy(moid: str) -> str:
 
 
 @mcp.tool()
-def list_vnics(filter: str = "", top: int = 50) -> str:
+def list_vnics(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all vNICs (virtual Ethernet interfaces), optionally filtered by LAN connectivity policy."""
     return _fmt_list(_get("vnic/EthIfs", filter, top),
                      ["Name", "MacAddress", "Order", "Placement", "Moid"], "vNIC")
@@ -468,28 +472,28 @@ def get_vnic(moid: str) -> str:
 # ── Pool Management ───────────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_pools(pool_type: str, filter: str = "", top: int = 50) -> str:
+def list_pools(pool_type: str, filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List pools of a specific type. E.g. pool_type='ippool/Pools' or 'macpool/Pools'."""
     return _fmt_list(_get(pool_type, filter, top),
                      ["Name", "Description", "Size", "Assigned", "Moid"], "pool")
 
 
 @mcp.tool()
-def list_ippool_blocks(filter: str = "", top: int = 50) -> str:
+def list_ippool_blocks(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all IP pool address blocks."""
     return _fmt_list(_get("ippool/ShadowBlocks", filter, top),
                      ["IpV4Block", "IpV4Config", "Moid"], "IP block")
 
 
 @mcp.tool()
-def list_macpool_blocks(filter: str = "", top: int = 50) -> str:
+def list_macpool_blocks(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all MAC pool blocks."""
     return _fmt_list(_get("macpool/Blocks", filter, top),
                      ["MacBlock", "Moid"], "MAC block")
 
 
 @mcp.tool()
-def list_fcpool_blocks(filter: str = "", top: int = 50) -> str:
+def list_fcpool_blocks(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all Fibre Channel pool blocks (WWNN/WWPN)."""
     return _fmt_list(_get("fcpool/Blocks", filter, top),
                      ["IdBlock", "Moid"], "FC pool block")
@@ -533,28 +537,28 @@ def get_adapter_telemetry(moid: str) -> str:
 
 
 @mcp.tool()
-def list_processor_units(filter: str = "", top: int = 50) -> str:
+def list_processor_units(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all processor units with utilization info."""
     return _fmt_list(_get("processor/Units", filter, top),
                      ["Dn", "Model", "OperState", "NumCores", "NumThreads", "Speed"], "processor")
 
 
 @mcp.tool()
-def list_memory_units(filter: str = "", top: int = 50) -> str:
+def list_memory_units(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all memory units with health and capacity."""
     return _fmt_list(_get("memory/Units", filter, top),
                      ["Dn", "Model", "Capacity", "OperState", "Type"], "memory unit")
 
 
 @mcp.tool()
-def list_storage_controllers(filter: str = "", top: int = 50) -> str:
+def list_storage_controllers(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List storage controllers with health and RAID information."""
     return _fmt_list(_get("storage/Controllers", filter, top),
                      ["Dn", "Model", "OperState", "RaidSupport", "Presence"], "storage controller")
 
 
 @mcp.tool()
-def list_physical_drives(filter: str = "", top: int = 50) -> str:
+def list_physical_drives(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List physical drives with health, capacity, and wear info."""
     return _fmt_list(_get("storage/PhysicalDisks", filter, top),
                      ["Dn", "Model", "Size", "DiskState", "DriveFirmware"], "physical drive")
@@ -575,43 +579,45 @@ def get_thermal_statistics(moid: str, resource_type: str = "compute/RackUnits") 
 
 
 @mcp.tool()
-def list_fan_modules(filter: str = "", top: int = 50) -> str:
+def list_fan_modules(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List fan modules with operational status and speed."""
     return _fmt_list(_get("equipment/Fans", filter, top),
                      ["Dn", "Model", "OperState", "Presence"], "fan")
 
 
 @mcp.tool()
-def list_psu_units(filter: str = "", top: int = 50) -> str:
+def list_psu_units(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List power supply units with status and output."""
     return _fmt_list(_get("equipment/Psus", filter, top),
                      ["Dn", "Model", "OperState", "Presence", "Voltage"], "PSU")
 
 
 @mcp.tool()
-def list_storage_virtual_drives(filter: str = "", top: int = 50) -> str:
+def list_storage_virtual_drives(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all virtual drives (RAID volumes)."""
     return _fmt_list(_get("storage/VirtualDrives", filter, top),
                      ["Dn", "Name", "Size", "DriveState", "Type"], "virtual drive")
 
 
 @mcp.tool()
-def list_pci_devices(filter: str = "", top: int = 50) -> str:
+def list_pci_devices(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all PCI devices: NICs, HBAs, GPUs, etc."""
     return _fmt_list(_get("pci/Devices", filter, top),
                      ["Dn", "Model", "OperState", "Presence", "Pid"], "PCI device")
 
 
 @mcp.tool()
-def list_graphics_cards(filter: str = "", top: int = 50) -> str:
+def list_graphics_cards(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all graphics cards (GPUs)."""
     return _fmt_list(_get("graphics/Cards", filter, top),
                      ["Dn", "Model", "OperState", "Presence"], "GPU")
 
 
 @mcp.tool()
-def get_top_resources(metric: str = "memory", top: int = 10) -> str:
+def get_top_resources(metric: Optional[str] = None, top: Optional[int] = None) -> str:
     """Get top N servers by metric: 'memory', 'cpu'. Returns the list sorted."""
+    metric = metric or "memory"
+    top    = top if top is not None else 10
     data = _get("compute/PhysicalSummaries", top=top)
     return _fmt_list(data, ["Name", "Model", "NumCpus", "AvailableMemory"], "server")
 
@@ -619,7 +625,7 @@ def get_top_resources(metric: str = "memory", top: int = 10) -> str:
 # ── Network & Fabric ──────────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_fabric_vlans(filter: str = "", top: int = 50) -> str:
+def list_fabric_vlans(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all fabric VLANs."""
     return _fmt_list(_get("fabric/Vlans", filter, top),
                      ["Name", "VlanId", "AutoAllowOnUplinks", "Moid"], "VLAN")
@@ -633,7 +639,7 @@ def get_fabric_vlan(moid: str) -> str:
 
 
 @mcp.tool()
-def list_fabric_vsans(filter: str = "", top: int = 50) -> str:
+def list_fabric_vsans(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all fabric VSANs (Fibre Channel)."""
     return _fmt_list(_get("fabric/Vsans", filter, top),
                      ["Name", "VsanId", "FcoeVlan", "Moid"], "VSAN")
@@ -647,7 +653,7 @@ def get_fabric_vsan(moid: str) -> str:
 
 
 @mcp.tool()
-def list_fabric_port_channels(filter: str = "", top: int = 50) -> str:
+def list_fabric_port_channels(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all fabric port channels."""
     return _fmt_list(_get("fabric/PortChannels", filter, top),
                      ["Name", "PcId", "AdminSpeed", "Moid"], "port channel")
@@ -663,49 +669,49 @@ def get_fabric_port_channel(moid: str) -> str:
 # ── Hardware & Firmware ───────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_firmware_running(filter: str = "", top: int = 50) -> str:
+def list_firmware_running(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all running firmware versions across the infrastructure."""
     return _fmt_list(_get("firmware/RunningFirmwares", filter, top),
                      ["Dn", "Type", "Version", "Component"], "firmware entry")
 
 
 @mcp.tool()
-def list_licenses(filter: str = "", top: int = 50) -> str:
+def list_licenses(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all license information for registered devices."""
     return _fmt_list(_get("license/LicenseInfos", filter, top),
                      ["LicenseType", "LicenseState", "LicenseCount", "Balance"], "license")
 
 
 @mcp.tool()
-def list_hcl_operating_systems(filter: str = "", top: int = 50) -> str:
+def list_hcl_operating_systems(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List supported operating systems from the Hardware Compatibility List."""
     return _fmt_list(_get("hcl/OperatingSystems", filter, top),
                      ["Vendor", "Name", "Version"], "OS")
 
 
 @mcp.tool()
-def list_hcl_hyperflex_compatibility(filter: str = "", top: int = 50) -> str:
+def list_hcl_hyperflex_compatibility(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List HyperFlex software compatibility information."""
     return _fmt_list(_get("hcl/HyperflexSoftwareCompatibilityInfos", filter, top),
                      ["ServerFwVersion", "HxdpVersion", "HypervisorType"], "compatibility entry")
 
 
 @mcp.tool()
-def list_equipment_io_cards(filter: str = "", top: int = 50) -> str:
+def list_equipment_io_cards(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all IO cards in chassis."""
     return _fmt_list(_get("equipment/IoCards", filter, top),
                      ["Dn", "Model", "OperState", "Presence"], "IO card")
 
 
 @mcp.tool()
-def list_equipment_sys_io_ctrls(filter: str = "", top: int = 50) -> str:
+def list_equipment_sys_io_ctrls(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all system IO controllers."""
     return _fmt_list(_get("equipment/SystemIoControllers", filter, top),
                      ["Dn", "Model", "OperState", "Presence"], "system IO controller")
 
 
 @mcp.tool()
-def list_management_controllers(filter: str = "", top: int = 50) -> str:
+def list_management_controllers(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all management controllers (CIMC, IMC, BMC)."""
     return _fmt_list(_get("management/Controllers", filter, top),
                      ["Dn", "Model", "ManagementIp", "OperState"], "management controller")
@@ -714,7 +720,7 @@ def list_management_controllers(filter: str = "", top: int = 50) -> str:
 # ── Workflow & System ─────────────────────────────────────────────────────────
 
 @mcp.tool()
-def list_workflows(filter: str = "", top: int = 25) -> str:
+def list_workflows(filter: Optional[str] = None, top: Optional[int] =25) -> str:
     """List workflow executions with status."""
     return _fmt_list(_get("workflow/WorkflowInfos", filter, top),
                      ["Name", "WorkflowStatus", "Progress", "StartTime", "EndTime"], "workflow")
@@ -728,7 +734,7 @@ def get_workflow(moid: str) -> str:
 
 
 @mcp.tool()
-def list_top_systems(filter: str = "", top: int = 50) -> str:
+def list_top_systems(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
     """List all top-level systems with associated compute resources."""
     return _fmt_list(_get("top/Systems", filter, top),
                      ["Dn", "Mode", "Ipv4Address"], "top system")
@@ -909,7 +915,7 @@ if ALL_TOOLS:
                          ["Name", "Enabled", "MaximumSessions", "RemotePort", "Moid"])
 
     @mcp.tool()
-    def list_kvm_policies(filter: str = "", top: int = 50) -> str:
+    def list_kvm_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all KVM policies."""
         return _fmt_list(_get("kvm/Policies", filter, top),
                          ["Name", "Enabled", "MaximumSessions", "Moid"], "KVM policy")
@@ -944,7 +950,7 @@ if ALL_TOOLS:
                          ["Name", "Enabled", "Mappings", "Moid"])
 
     @mcp.tool()
-    def list_virtual_media_policies(filter: str = "", top: int = 50) -> str:
+    def list_virtual_media_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all virtual media policies."""
         return _fmt_list(_get("vmedia/Policies", filter, top),
                          ["Name", "Enabled", "Moid"], "virtual media policy")
@@ -978,7 +984,7 @@ if ALL_TOOLS:
                          ["Name", "Description", "Partitions", "Moid"])
 
     @mcp.tool()
-    def list_sdcard_policies(filter: str = "", top: int = 50) -> str:
+    def list_sdcard_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all SD card policies."""
         return _fmt_list(_get("sdcard/Policies", filter, top),
                          ["Name", "Description", "Moid"], "SD card policy")
@@ -1203,26 +1209,26 @@ if ALL_TOOLS:
         return f"Deleted port channel Moid: {moid}"
 
     @mcp.tool()
-    def list_fabric_flow_control_policies(filter: str = "", top: int = 50) -> str:
+    def list_fabric_flow_control_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List fabric flow control policies."""
         return _fmt_list(_get("fabric/FlowControlPolicies", filter, top),
                          ["Name", "PriorityFlowControlMode", "Moid"], "flow control policy")
 
     @mcp.tool()
-    def list_fabric_link_control_policies(filter: str = "", top: int = 50) -> str:
+    def list_fabric_link_control_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List fabric link control policies."""
         return _fmt_list(_get("fabric/LinkControlPolicies", filter, top),
                          ["Name", "Moid"], "link control policy")
 
     @mcp.tool()
-    def list_fabric_multicast_policies(filter: str = "", top: int = 50) -> str:
+    def list_fabric_multicast_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List fabric multicast policies."""
         return _fmt_list(_get("fabric/MulticastPolicies", filter, top),
                          ["Name", "QuerierState", "SnoopingState", "Moid"],
                          "multicast policy")
 
     @mcp.tool()
-    def list_fabric_qos_policies(filter: str = "", top: int = 50) -> str:
+    def list_fabric_qos_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List fabric QoS (system QoS) policies."""
         return _fmt_list(_get("fabric/SystemQosPolicies", filter, top),
                          ["Name", "Moid"], "QoS policy")
@@ -1234,19 +1240,19 @@ if ALL_TOOLS:
                          ["Name", "Classes", "Moid"])
 
     @mcp.tool()
-    def list_fabric_uplink_ports(filter: str = "", top: int = 50) -> str:
+    def list_fabric_uplink_ports(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all fabric uplink port roles."""
         return _fmt_list(_get("fabric/UplinkRoles", filter, top),
                          ["Dn", "AdminSpeed", "Moid"], "uplink port")
 
     @mcp.tool()
-    def list_fabric_server_ports(filter: str = "", top: int = 50) -> str:
+    def list_fabric_server_ports(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all fabric server port roles."""
         return _fmt_list(_get("fabric/ServerRoles", filter, top),
                          ["Dn", "Moid"], "server port")
 
     @mcp.tool()
-    def list_fabric_port_operations(filter: str = "", top: int = 50) -> str:
+    def list_fabric_port_operations(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List fabric port operations."""
         return _fmt_list(_get("fabric/PortOperations", filter, top),
                          ["Dn", "AdminState", "Moid"], "port operation")
@@ -1279,19 +1285,19 @@ if ALL_TOOLS:
         return f"Deleted adapter config policy Moid: {moid}"
 
     @mcp.tool()
-    def list_eth_adapter_policies(filter: str = "", top: int = 50) -> str:
+    def list_eth_adapter_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all Ethernet adapter policies."""
         return _fmt_list(_get("vnic/EthAdapterPolicies", filter, top),
                          ["Name", "Description", "Moid"], "Ethernet adapter policy")
 
     @mcp.tool()
-    def list_eth_qos_policies(filter: str = "", top: int = 50) -> str:
+    def list_eth_qos_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all Ethernet QoS policies."""
         return _fmt_list(_get("vnic/EthQosPolicies", filter, top),
                          ["Name", "Mtu", "Cos", "Moid"], "Ethernet QoS policy")
 
     @mcp.tool()
-    def list_eth_network_group_policies(filter: str = "", top: int = 50) -> str:
+    def list_eth_network_group_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List all Ethernet network group policies (trunk VLAN lists)."""
         return _fmt_list(_get("vnic/EthNetworkPolicies", filter, top),
                          ["Name", "Moid"], "Ethernet network policy")
@@ -1383,7 +1389,7 @@ if ALL_TOOLS:
     # ── Security & System Policies ────────────────────────────────────────────
 
     @mcp.tool()
-    def list_snmp_policies(filter: str = "", top: int = 50) -> str:
+    def list_snmp_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List SNMP policies."""
         return _fmt_list(_get("snmp/Policies", filter, top),
                          ["Name", "Enabled", "SnmpPort", "Moid"], "SNMP policy")
@@ -1414,7 +1420,7 @@ if ALL_TOOLS:
         return f"Deleted SNMP policy Moid: {moid}"
 
     @mcp.tool()
-    def list_syslog_policies(filter: str = "", top: int = 50) -> str:
+    def list_syslog_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List syslog policies."""
         return _fmt_list(_get("syslog/Policies", filter, top),
                          ["Name", "Moid"], "syslog policy")
@@ -1436,7 +1442,7 @@ if ALL_TOOLS:
         return f"Deleted syslog policy Moid: {moid}"
 
     @mcp.tool()
-    def list_ntp_policies(filter: str = "", top: int = 50) -> str:
+    def list_ntp_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List NTP policies."""
         return _fmt_list(_get("ntp/Policies", filter, top),
                          ["Name", "Enabled", "NtpServers", "Moid"], "NTP policy")
@@ -1459,7 +1465,7 @@ if ALL_TOOLS:
         return f"Deleted NTP policy Moid: {moid}"
 
     @mcp.tool()
-    def list_smtp_policies(filter: str = "", top: int = 50) -> str:
+    def list_smtp_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List SMTP policies."""
         return _fmt_list(_get("smtp/Policies", filter, top),
                          ["Name", "Enabled", "SmtpServer", "Moid"], "SMTP policy")
@@ -1483,20 +1489,20 @@ if ALL_TOOLS:
     # ── Hardware & Compliance ─────────────────────────────────────────────────
 
     @mcp.tool()
-    def list_terminal_audit_logs(filter: str = "", top: int = 50) -> str:
+    def list_terminal_audit_logs(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List terminal audit logs for compliance and security review."""
         return _fmt_list(_get("aaa/AuditRecords", filter, top),
                          ["Event", "Instname", "UserName", "CreateTime"], "audit log")
 
     @mcp.tool()
-    def list_tam_advisory_instances(filter: str = "", top: int = 50) -> str:
+    def list_tam_advisory_instances(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List TAM advisory instances affecting your environment."""
         return _fmt_list(_get("tam/AdvisoryInstances", filter, top),
                          ["Advisory", "State", "AffectedObjectType", "Moid"],
                          "advisory instance")
 
     @mcp.tool()
-    def list_tam_security_advisories(filter: str = "", top: int = 50) -> str:
+    def list_tam_security_advisories(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List security advisories (CVEs and PSIRTs)."""
         return _fmt_list(_get("tam/SecurityAdvisories", filter, top),
                          ["Name", "Severity", "BaseScore", "State"], "security advisory")
@@ -1508,7 +1514,7 @@ if ALL_TOOLS:
                          ["Name", "Severity", "Description", "State", "Moid"])
 
     @mcp.tool()
-    def list_equipment_tpms(filter: str = "", top: int = 50) -> str:
+    def list_equipment_tpms(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List Trusted Platform Module (TPM) chips across servers."""
         return _fmt_list(_get("equipment/Tpms", filter, top),
                          ["Dn", "Model", "OperState", "TpmSupportEnabled", "Version"],
@@ -1521,14 +1527,14 @@ if ALL_TOOLS:
                          ["Dn", "Model", "OperState", "TpmSupportEnabled", "Version"])
 
     @mcp.tool()
-    def list_firmware_upgrades(filter: str = "", top: int = 50) -> str:
+    def list_firmware_upgrades(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List firmware upgrade tasks and their status."""
         return _fmt_list(_get("firmware/Upgrades", filter, top),
                          ["Status", "UpgType", "DirectDownload", "Moid"],
                          "firmware upgrade")
 
     @mcp.tool()
-    def list_hcl_operating_system_vendors(filter: str = "", top: int = 50) -> str:
+    def list_hcl_operating_system_vendors(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List HCL operating system vendors."""
         return _fmt_list(_get("hcl/OperatingSystemVendors", filter, top),
                          ["Name", "Moid"], "OS vendor")
@@ -1536,27 +1542,27 @@ if ALL_TOOLS:
     # ── Storage ───────────────────────────────────────────────────────────────
 
     @mcp.tool()
-    def list_storage_flex_flash_controllers(filter: str = "", top: int = 50) -> str:
+    def list_storage_flex_flash_controllers(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List FlexFlash SD card controllers."""
         return _fmt_list(_get("storage/FlexFlashControllers", filter, top),
                          ["Dn", "Model", "OperState", "Presence"],
                          "FlexFlash controller")
 
     @mcp.tool()
-    def list_storage_flex_flash_drives(filter: str = "", top: int = 50) -> str:
+    def list_storage_flex_flash_drives(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List FlexFlash SD card drives."""
         return _fmt_list(_get("storage/FlexFlashPhysicalDrives", filter, top),
                          ["Dn", "CardStatus", "CardType", "OemId"],
                          "FlexFlash drive")
 
     @mcp.tool()
-    def list_storage_local_disk_policies(filter: str = "", top: int = 50) -> str:
+    def list_storage_local_disk_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List storage local disk configuration policies."""
         return _fmt_list(_get("storage/StoragePolicies", filter, top),
                          ["Name", "Description", "Moid"], "storage policy")
 
     @mcp.tool()
-    def list_boot_device_boot_securities(filter: str = "", top: int = 50) -> str:
+    def list_boot_device_boot_securities(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List boot device security configurations."""
         return _fmt_list(_get("boot/DeviceBootSecurities", filter, top),
                          ["Dn", "SecureBoot"], "boot security")
@@ -1564,14 +1570,14 @@ if ALL_TOOLS:
     # ── Miscellaneous ─────────────────────────────────────────────────────────
 
     @mcp.tool()
-    def list_management_interfaces(filter: str = "", top: int = 50) -> str:
+    def list_management_interfaces(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List management network interfaces (CIMC/IMC interfaces)."""
         return _fmt_list(_get("management/Interfaces", filter, top),
                          ["Dn", "IpAddress", "MacAddress", "HostName"],
                          "management interface")
 
     @mcp.tool()
-    def list_workflow_tasks(filter: str = "", top: int = 50) -> str:
+    def list_workflow_tasks(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List individual workflow task executions."""
         return _fmt_list(_get("workflow/TaskInfos", filter, top),
                          ["Name", "Status", "StartTime", "EndTime", "Moid"],
@@ -1596,7 +1602,7 @@ if ALL_TOOLS:
         return _fmt_ok(_post("fabric/EthNetworkGroups", body))
 
     @mcp.tool()
-    def list_fabric_lacp_policies(filter: str = "", top: int = 50) -> str:
+    def list_fabric_lacp_policies(filter: Optional[str] = None, top: Optional[int] = 50) -> str:
         """List LACP (Link Aggregation Control Protocol) policies."""
         return _fmt_list(_get("fabric/LacpPolicies", filter, top),
                          ["Name", "Moid"], "LACP policy")
