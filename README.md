@@ -141,13 +141,22 @@ The demo includes an MCP server (`intersight_mcp.py`) that connects to Cisco Int
 
 ### Setup
 
-Create a `.env` file in the project root (see `.env.example`):
+Create a `.env` file in the project root (see `.env.example`). Two auth methods are supported — use whichever you have:
 
+**Option 1 — OAuth2 bearer token (simplest)**
+```bash
+INTERSIGHT_OAUTH_TOKEN=your_oauth_bearer_token_here
+INTERSIGHT_BASE_URL=https://intersight.com
+```
+Generate a token in Intersight → Settings → OAuth2 Applications.
+
+**Option 2 — HTTP Signature (API key + private key)**
 ```bash
 INTERSIGHT_API_KEY_ID=your_key_id_here
 INTERSIGHT_API_SECRET_KEY_FILE=~/.intersight/private-key.pem
 INTERSIGHT_BASE_URL=https://intersight.com
 ```
+If both `INTERSIGHT_OAUTH_TOKEN` and an API key are set, OAuth2 takes priority.
 
 Toggle tools on/off during chat with the `/tools` command.
 

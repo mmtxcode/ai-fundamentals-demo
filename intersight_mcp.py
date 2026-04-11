@@ -61,7 +61,10 @@ def _get_client():
     """
     Build an authenticated Intersight ApiClient from environment variables.
 
-    Required:
+    OAuth2 (preferred — set one of):
+      INTERSIGHT_OAUTH_TOKEN         — bearer token string
+
+    HTTP Signature (alternative — set both):
       INTERSIGHT_API_KEY_ID          — API key ID from Intersight Settings → API Keys
       INTERSIGHT_API_SECRET_KEY_FILE — path to private key PEM file
         OR
@@ -73,13 +76,25 @@ def _get_client():
     import intersight
     from intersight.api_client import ApiClient
 
+    base_url    = os.environ.get("INTERSIGHT_BASE_URL", "https://intersight.com").strip()
+    oauth_token = os.environ.get("INTERSIGHT_OAUTH_TOKEN", "").strip()
+
+    # ── OAuth2 bearer token path ──────────────────────────────────────────────
+    if oauth_token:
+        config = intersight.Configuration(host=base_url)
+        config.access_token = oauth_token
+        return ApiClient(config)
+
+    # ── HTTP Signature path ───────────────────────────────────────────────────
     key_id   = os.environ.get("INTERSIGHT_API_KEY_ID", "").strip()
     key_file = os.environ.get("INTERSIGHT_API_SECRET_KEY_FILE", "").strip()
     key_str  = os.environ.get("INTERSIGHT_API_SECRET_KEY", "").strip()
-    base_url = os.environ.get("INTERSIGHT_BASE_URL", "https://intersight.com").strip()
 
     if not key_id:
-        raise RuntimeError("INTERSIGHT_API_KEY_ID not set. Add it to your .env file.")
+        raise RuntimeError(
+            "No Intersight credentials found. Set INTERSIGHT_OAUTH_TOKEN for OAuth2, "
+            "or INTERSIGHT_API_KEY_ID + INTERSIGHT_API_SECRET_KEY_FILE for HTTP Signature."
+        )
     if not key_file and not key_str:
         raise RuntimeError(
             "Set INTERSIGHT_API_SECRET_KEY_FILE or INTERSIGHT_API_SECRET_KEY in .env."
