@@ -57,6 +57,12 @@ mcp = FastMCP(
 
 # ── Authentication ────────────────────────────────────────────────────────────
 
+def _ssl_context():
+    """Return an SSL context using the certifi CA bundle (fixes macOS cert issues)."""
+    import ssl, certifi
+    return ssl.create_default_context(cafile=certifi.where())
+
+
 def _fetch_oauth_token(base_url: str, client_id: str, client_secret: str) -> str:
     """
     Exchange an OAuth2 Client ID + Client Secret for a bearer token using
@@ -74,7 +80,7 @@ def _fetch_oauth_token(base_url: str, client_id: str, client_secret: str) -> str
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=15) as resp:
+    with urllib.request.urlopen(req, timeout=15, context=_ssl_context()) as resp:
         data = _json.loads(resp.read())
     token = data.get("access_token") or data.get("token")
     if not token:
@@ -110,17 +116,21 @@ def _get_client():
     client_secret = os.environ.get("INTERSIGHT_CLIENT_SECRET", "").strip()
     oauth_token   = os.environ.get("INTERSIGHT_OAUTH_TOKEN", "").strip()
 
+    import certifi
+
     # ── OAuth2 client credentials (exchange ID+Secret → token) ───────────────
     if client_id and client_secret:
         token = _fetch_oauth_token(base_url, client_id, client_secret)
         config = intersight.Configuration(host=base_url)
         config.access_token = token
+        config.ssl_ca_cert = certifi.where()
         return ApiClient(config)
 
     # ── OAuth2 pre-fetched bearer token ───────────────────────────────────────
     if oauth_token:
         config = intersight.Configuration(host=base_url)
         config.access_token = oauth_token
+        config.ssl_ca_cert = certifi.where()
         return ApiClient(config)
 
     # ── HTTP Signature path ───────────────────────────────────────────────────
@@ -165,6 +175,7 @@ def _get_client():
 
     config = intersight.Configuration(host=base_url)
     config.signing_info = intersight.signing.HttpSigningConfiguration(**signing_kwargs)
+    config.ssl_ca_cert = certifi.where()
     return ApiClient(config)
 
 
