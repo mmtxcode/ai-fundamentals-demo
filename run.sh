@@ -49,5 +49,12 @@ source "$VENV_DIR/bin/activate"
 pip install -q --upgrade pip
 pip install -q -r "$SCRIPT_DIR/requirements.txt"
 
+# ── Load .env if present ─────────────────────────────────────────────────────
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # ── Launch ────────────────────────────────────────────────────────────────────
 python "$SCRIPT_DIR/chat.py" "$@"

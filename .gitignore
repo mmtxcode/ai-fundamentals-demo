@@ -1,6 +1,12 @@
 # Virtual environment
 .venv/
 
+# Credentials — never commit these
+.env
+*.pem
+*private-key*
+*secret-key*
+
 # Python
 __pycache__/
 *.py[cod]

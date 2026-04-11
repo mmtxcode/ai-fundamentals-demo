@@ -1,3 +1,6 @@
 ollama>=0.3.0
 rich>=13.7.0
+mcp>=1.0.0
+intersight>=1.0.11
+python-dotenv>=1.0.0
 # pynvml>=11.0.0  # Uncomment for NVIDIA GPU utilization stats
