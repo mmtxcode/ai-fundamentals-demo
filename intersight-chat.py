@@ -216,9 +216,10 @@ def chat_turn(model: str, messages: list[dict], mcp: MCPClient) -> str:
         stream=False,
     )
 
-    # Phase 2 — execute any tool calls
+    # Phase 2 — execute any tool calls, storing results to avoid double-calling
+    tool_results: dict[str, str] = {}  # fn.name → result (keyed by call index)
     if response.message.tool_calls:
-        for tc in response.message.tool_calls:
+        for i, tc in enumerate(response.message.tool_calls):
             fn = tc.function
             args = fn.arguments if isinstance(fn.arguments, dict) else {}
 
@@ -230,11 +231,12 @@ def chat_turn(model: str, messages: list[dict], mcp: MCPClient) -> str:
             t0 = time.perf_counter()
             result = mcp.call(fn.name, args)
             elapsed = time.perf_counter() - t0
+            tool_results[i] = result
 
-            console.print(f"[dim]  → {result[:300]}{'…' if len(result) > 300 else ''}[/]")
+            console.print(f"[dim]  → {result}[/]")
             console.print(f"[dim]  ({elapsed:.2f}s)[/]\n")
 
-        # Add assistant tool-call turn + tool results to context
+        # Add assistant tool-call turn + tool results to context (reuse stored results)
         full_messages = full_messages + [
             {
                 "role": "assistant",
@@ -242,9 +244,8 @@ def chat_turn(model: str, messages: list[dict], mcp: MCPClient) -> str:
                 "tool_calls": response.message.tool_calls,
             }
         ] + [
-            {"role": "tool", "content": mcp.call(tc.function.name,
-                tc.function.arguments if isinstance(tc.function.arguments, dict) else {})}
-            for tc in response.message.tool_calls
+            {"role": "tool", "content": tool_results[i]}
+            for i, tc in enumerate(response.message.tool_calls)
         ]
 
     # Phase 3 — stream the final answer
