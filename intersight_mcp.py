@@ -310,6 +310,66 @@ def list_compute_servers(filter: Any = None, top: Any = None) -> str:
 
 
 @mcp.tool()
+def list_server_details(filter: Any = None, top: Any = None) -> str:
+    """
+    List all servers with full hardware details — model, serial, CPU count, memory,
+    firmware, management IP, and power state. Use this for 'list server details',
+    'show server specs', or 'what hardware do we have' type questions.
+    No MOID required — returns rich info for every server in one call.
+    """
+    data = _get("compute/PhysicalSummaries", filter, top)
+    results = data.get("Results") or []
+    count   = data.get("Count", len(results))
+    if not results:
+        return "No servers found."
+
+    lines = [f"{count} server(s) with full details:\n"]
+    for item in results:
+        name    = item.get("Name") or item.get("Dn") or "Unknown"
+        model   = item.get("Model", "")
+        serial  = item.get("Serial", "")
+        power   = item.get("OperPowerState", "")
+        cpus    = item.get("NumCpus", "")
+        cores   = item.get("NumCpuCores", "")
+        threads = item.get("NumThreads", "")
+        mem_mb  = item.get("AvailableMemory")
+        tot_mb  = item.get("TotalMemory")
+        fw      = item.get("Firmware", "")
+        mgmt_ip = item.get("ManagementIp", "")
+        oper    = item.get("OperState", "")
+
+        mem_str = ""
+        if tot_mb:
+            mem_str = f"{int(tot_mb) // 1024} GB total"
+            if mem_mb and mem_mb != tot_mb:
+                mem_str += f" / {int(mem_mb) // 1024} GB available"
+        elif mem_mb:
+            mem_str = f"{int(mem_mb) // 1024} GB"
+
+        cpu_str = ""
+        if cpus:
+            cpu_str = f"{cpus} CPU(s)"
+            if cores:
+                cpu_str += f" / {cores} cores"
+            if threads:
+                cpu_str += f" / {threads} threads"
+
+        parts = [f"Name: {name}"]
+        if model:   parts.append(f"Model: {model}")
+        if serial:  parts.append(f"Serial: {serial}")
+        if power:   parts.append(f"Power: {power}")
+        if oper:    parts.append(f"State: {oper}")
+        if cpu_str: parts.append(f"CPU: {cpu_str}")
+        if mem_str: parts.append(f"Memory: {mem_str}")
+        if fw:      parts.append(f"Firmware: {fw}")
+        if mgmt_ip: parts.append(f"Mgmt IP: {mgmt_ip}")
+
+        lines.append("  " + "  |  ".join(parts))
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def list_compute_blades(filter: Any = None, top: Any = None) -> str:
     """List all blade servers in chassis."""
     return _fmt_list(_get("compute/Blades", filter, top),
