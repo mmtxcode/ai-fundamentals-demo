@@ -4,4 +4,5 @@ mcp>=1.0.0
 intersight>=1.0.11
 python-dotenv>=1.0.0
 certifi>=2024.0.0
-# pynvml>=11.0.0  # Uncomment for NVIDIA GPU utilization stats
+# pynvml>=11.0.0  # Uncomment for NVIDIA GPU utilization stats (auto-installed by nvidia-run.sh)
+# openai>=1.0.0   # Required for nvidia-inference-demo.py (auto-installed by nvidia-run.sh)
