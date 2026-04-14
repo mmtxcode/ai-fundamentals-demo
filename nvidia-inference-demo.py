@@ -26,6 +26,7 @@ import threading
 import subprocess
 import platform
 import json as _json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 try:
@@ -505,7 +506,8 @@ def render_help() -> Panel:
     t.add_column("Command", style="bold cyan", width=18)
     t.add_column("Description", style="white")
     t.add_row("/help",      "Show this panel")
-    t.add_row("/bench",     "Run throughput benchmark (10 identical prompts)")
+    t.add_row("/batch",     "★  Continuous batching demo — the NIM 'aha' moment")
+    t.add_row("/bench",     "Run throughput benchmark (sequential requests)")
     t.add_row("/gpu",       "Print current GPU snapshot")
     t.add_row("/models",    "List available models on the server")
     t.add_row("/model <n>", "Switch to a different model")
@@ -570,6 +572,316 @@ computed once per token as it enters the context.
     (system prompts, few-shot examples saved for free)
   • [bold]Speculative decoding[/] — draft model generates candidates; verify in parallel
 """
+
+
+# ── Continuous Batching Demo ──────────────────────────────────────────────────
+
+# Short, deterministic prompt — same for every user so timing differences
+# come purely from queuing, not content variance.
+_BATCH_PROMPT = (
+    "In exactly two sentences, explain what a GPU tensor core does "
+    "and why it matters for AI inference."
+)
+_BATCH_MAX_TOKENS = 80
+_BATCH_N          = 6   # number of simulated users
+
+
+def _timed_request(client: openai.OpenAI, model: str,
+                   prompt: str, max_tokens: int, user_idx: int) -> dict:
+    """
+    Send one streaming request and return a timing dict.
+    Designed to be called from multiple threads simultaneously.
+    """
+    r: dict = {
+        "user":          user_idx + 1,
+        "t_sent":        None,
+        "t_first_token": None,
+        "t_done":        None,
+        "tokens":        0,
+        "error":         None,
+    }
+    try:
+        r["t_sent"] = time.perf_counter()
+        first = True
+        stream = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True,
+            max_tokens=max_tokens,
+        )
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                if first:
+                    r["t_first_token"] = time.perf_counter()
+                    first = False
+                r["tokens"] += 1
+            if hasattr(chunk, "usage") and chunk.usage:
+                if getattr(chunk.usage, "completion_tokens", 0):
+                    r["tokens"] = chunk.usage.completion_tokens
+        r["t_done"] = time.perf_counter()
+    except Exception as e:
+        r["error"] = str(e)
+        r["t_done"] = time.perf_counter()
+    return r
+
+
+def _gantt_panel(seq_results: list[dict], con_results: list[dict],
+                 seq_start: float, con_start: float) -> Panel:
+    """
+    Side-by-side ASCII Gantt chart — the visual 'aha moment'.
+
+    Each row is one user. The bar spans from when their request was sent
+    to when the last token arrived, normalised to the same total span so
+    both charts are directly comparable.
+    """
+    CHART_W = 40   # characters wide
+
+    def _row(t_sent: float, t_done: float, batch_start: float,
+             total_span: float, color: str) -> str:
+        if total_span <= 0:
+            return ""
+        start_frac = max(0.0, (t_sent - batch_start) / total_span)
+        done_frac  = min(1.0, (t_done  - batch_start) / total_span)
+        col_s = int(start_frac * CHART_W)
+        col_e = max(col_s + 1, int(done_frac * CHART_W))
+        bar   = " " * col_s + "█" * (col_e - col_s)
+        secs  = t_done - t_sent
+        return f"[{color}]{bar:<{CHART_W}}[/]  [dim]{secs:.1f}s[/]"
+
+    # Use the longer of the two total spans as the common scale so bars
+    # are directly comparable.
+    seq_span = (seq_results[-1]["t_done"]  - seq_start)  if seq_results else 1
+    con_span = (con_results[-1]["t_done"]  - con_start)  if con_results else 1
+    total_span = max(seq_span, con_span)
+
+    t = Table(box=box.SIMPLE, show_header=True, header_style="bold",
+              padding=(0, 1))
+    t.add_column("User",    style="bold cyan",  width=6,  no_wrap=True)
+    t.add_column(f"Sequential  (total {seq_span:.1f}s)",
+                 style="white", width=CHART_W + 8, no_wrap=True)
+    t.add_column(f"Concurrent  (total {con_span:.1f}s)",
+                 style="white", width=CHART_W + 8, no_wrap=True)
+
+    for i in range(max(len(seq_results), len(con_results))):
+        sr = seq_results[i] if i < len(seq_results) else None
+        cr = con_results[i] if i < len(con_results) else None
+
+        seq_bar = _row(sr["t_sent"], sr["t_done"], seq_start,
+                       total_span, "yellow") if sr else ""
+        con_bar = _row(cr["t_sent"], cr["t_done"], con_start,
+                       total_span, "bright_green") if cr else ""
+
+        t.add_row(f"User {i + 1}", seq_bar, con_bar)
+
+    speedup = seq_span / con_span if con_span > 0 else 1.0
+
+    return Panel(
+        t,
+        title="[bold]Request Timeline  ·  same horizontal scale[/]",
+        subtitle=(
+            f"[bold bright_green]{speedup:.1f}× faster total wall time "
+            f"with concurrent batching[/]"
+            if speedup > 1.1 else
+            "[dim]Run against vLLM / NIM for larger speedup via continuous batching[/]"
+        ),
+        border_style="bright_magenta",
+        padding=(0, 1),
+    )
+
+
+def run_batching_demo(client: openai.OpenAI, model: str, gpu: GPUMonitor):
+    """
+    The continuous-batching 'aha' demo.
+
+    Phase 1 — Sequential:
+      Send _BATCH_N requests one at a time.  User N waits for users 1…N-1
+      to finish before their request even starts.  GPU idles between requests.
+
+    Phase 2 — Concurrent:
+      Fire all _BATCH_N requests simultaneously from separate threads.
+      With a NIM / vLLM backend the server uses continuous batching:
+        • Prefill all sequences in one fused forward pass
+        • Decode all sequences together — one GPU step produces one token
+          for EVERY active user, not just one
+      Total wall time ≈ a single request, regardless of user count.
+
+    The Gantt chart at the end makes the difference unmissable.
+    """
+    n = _BATCH_N
+
+    console.print()
+    console.print(Rule("[bold bright_magenta]Continuous Batching Demo[/]",
+                       style="bright_magenta"))
+    console.print()
+    console.print(Panel(
+        "[bold yellow]What happens when multiple users ask at the same time?[/]\n\n"
+        f"This demo sends [bold]{n} identical requests[/] in two modes:\n\n"
+        "  [bold yellow]Phase 1[/]  Sequential  — "
+        "each request waits for the previous to finish\n"
+        "  [bold bright_green]Phase 2[/]  Concurrent  — "
+        "all requests fire simultaneously\n\n"
+        "[dim]With NIM / vLLM the server batches all users into the same GPU "
+        "forward pass.\nWith Ollama the server queues them — same result as "
+        "sequential.[/]",
+        border_style="bright_magenta",
+        padding=(0, 2),
+    ))
+    input("\n  Press [Enter] to start...\n")
+
+    # ── Phase 1 : Sequential ──────────────────────────────────────────────────
+    console.print(Rule("[yellow]Phase 1 — Sequential  (no batching)[/]",
+                       style="yellow"))
+    console.print(
+        "[dim]Sending one request at a time — "
+        "later users sit in line waiting.[/]\n"
+    )
+
+    seq_results: list[dict] = []
+    seq_start = time.perf_counter()
+
+    gpu.start()
+    for i in range(n):
+        console.print(
+            f"  [dim]→ Sending request for User {i + 1} …[/]", end=" "
+        )
+        r = _timed_request(client, model, _BATCH_PROMPT,
+                           _BATCH_MAX_TOKENS, i)
+        r["t_sent_rel"] = r["t_sent"] - seq_start
+        r["t_done_rel"] = r["t_done"] - seq_start
+        seq_results.append(r)
+
+        if r["error"]:
+            console.print(f"[red]error: {r['error']}[/]")
+        else:
+            waited  = r["t_sent_rel"]
+            elapsed = r["t_done"] - r["t_sent"]
+            console.print(
+                f"[yellow]waited {waited:.1f}s in queue[/]  →  "
+                f"response in {elapsed:.1f}s  "
+                f"([dim]{r['tokens']} tok[/])  [green]✓[/]"
+            )
+    gpu.stop()
+
+    seq_total = seq_results[-1]["t_done_rel"] if seq_results else 0
+    seq_gpu   = gpu.stats()
+
+    console.print(
+        f"\n  [yellow]Total wall time: {seq_total:.1f}s[/]  "
+        f"([dim]GPU avg util: "
+        f"{seq_gpu['avg_util']:.0f}%[/])\n"
+        if seq_gpu else
+        f"\n  [yellow]Total wall time: {seq_total:.1f}s[/]\n"
+    )
+
+    # ── Explain what just happened ────────────────────────────────────────────
+    console.print(Panel(
+        "[bold yellow]What you just saw (sequential):[/]\n\n"
+        f"  User 1 got their answer right away.\n"
+        f"  User {n} had to wait ~{seq_results[-2]['t_done_rel']:.0f}s "
+        f"before the server even looked at their message.\n\n"
+        "  The GPU was [bold]idle between each request[/] — "
+        "it finished one user's tokens,\n"
+        "  took a breath, then started the next. "
+        "Wasted capacity every time.\n\n"
+        "[dim]This is how a naive single-threaded server works.[/]",
+        border_style="yellow",
+        padding=(0, 2),
+    ))
+    input("  Press [Enter] to run Phase 2...\n")
+
+    # ── Phase 2 : Concurrent ──────────────────────────────────────────────────
+    console.print(Rule("[bright_green]Phase 2 — Concurrent  (continuous batching)[/]",
+                       style="bright_green"))
+    console.print(
+        f"[dim]Firing all {n} requests simultaneously — "
+        "watch how long User {n} waits now.[/]\n"
+    )
+
+    con_results_raw: dict[int, dict] = {}
+    con_start = time.perf_counter()
+    lock = threading.Lock()
+
+    # Track live completions
+    completed = [0]
+
+    def _worker(idx: int):
+        r = _timed_request(client, model, _BATCH_PROMPT,
+                           _BATCH_MAX_TOKENS, idx)
+        with lock:
+            con_results_raw[idx] = r
+            completed[0] += 1
+            elapsed = r["t_done"] - r["t_sent"]
+            waited  = r["t_sent"] - con_start
+            status  = "[red]✗[/]" if r["error"] else "[green]✓[/]"
+            console.print(
+                f"  User {idx + 1} done  "
+                f"[dim]sent +{waited:.2f}s[/]  →  "
+                f"response in {elapsed:.1f}s  "
+                f"([dim]{r['tokens']} tok[/])  {status}"
+            )
+
+    gpu.start()
+    console.print(f"  [bright_green]→ Sending all {n} requests NOW...[/]\n")
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        futures = [pool.submit(_worker, i) for i in range(n)]
+        for f in as_completed(futures):
+            f.result()  # surface any exceptions
+    gpu.stop()
+
+    con_results = [con_results_raw[i] for i in range(n)
+                   if i in con_results_raw]
+    con_total = (max(r["t_done"] for r in con_results) - con_start) \
+                if con_results else 0
+    con_gpu = gpu.stats()
+
+    console.print(
+        f"\n  [bright_green]Total wall time: {con_total:.1f}s[/]  "
+        f"([dim]GPU avg util: "
+        f"{con_gpu['avg_util']:.0f}%[/])\n"
+        if con_gpu else
+        f"\n  [bright_green]Total wall time: {con_total:.1f}s[/]\n"
+    )
+
+    # ── Gantt comparison ──────────────────────────────────────────────────────
+    console.print(Rule("[bold]Timeline Comparison[/]", style="bright_magenta"))
+    console.print()
+    console.print(_gantt_panel(seq_results, con_results, seq_start, con_start))
+
+    # ── The explanation ───────────────────────────────────────────────────────
+    speedup = seq_total / con_total if con_total > 0 else 1.0
+    gpu_diff = ""
+    if seq_gpu and con_gpu:
+        gpu_diff = (
+            f"\n\n  GPU utilization:\n"
+            f"    Sequential   {seq_gpu['avg_util']:.0f}% avg — "
+            f"idles between each user's tokens\n"
+            f"    Concurrent   {con_gpu['avg_util']:.0f}% avg — "
+            f"kept busy serving all users at once"
+        )
+
+    console.print(Panel(
+        f"[bold bright_green]What NIM / vLLM does differently:[/]\n\n"
+        "  With [bold]continuous batching[/], the server doesn't wait for a "
+        "request to finish\n"
+        "  before accepting the next one. Instead:\n\n"
+        "    1. Every incoming request joins the [bold]active batch[/] immediately\n"
+        "    2. Each GPU forward pass produces one token for [bold]every active "
+        "user[/]\n"
+        "    3. Finished sequences are swapped out; new ones slip in — "
+        "[bold]no idle time[/]\n\n"
+        f"  Result: {n} users got answers in [bold bright_green]{con_total:.1f}s[/] "
+        f"instead of [bold yellow]{seq_total:.1f}s[/]  "
+        f"([bold bright_green]{speedup:.1f}× faster[/] total throughput)"
+        f"{gpu_diff}\n\n"
+        "[dim]The GPU does the same amount of work either way — batching just "
+        "stops it from waiting around between users.[/]",
+        title="[bold]Why Continuous Batching Matters[/]",
+        border_style="bright_green",
+        padding=(1, 2),
+    ))
 
 
 # ── Benchmark ─────────────────────────────────────────────────────────────────
@@ -657,9 +969,8 @@ def run_benchmark(client: openai.OpenAI, model: str, gpu: GPUMonitor,
     console.print()
     console.print(Panel(t, title="[bold]Benchmark Results[/]", border_style="yellow"))
     console.print(
-        "[dim]\nNote: Run concurrent requests (e.g. with vLLM's /v1/completions "
-        "batch endpoint) to see much higher aggregate throughput via continuous "
-        "batching — the GPU serves multiple users between each token step.[/]"
+        "[dim]\nTip: Run [bold]/batch[/] to see a side-by-side sequential vs "
+        "concurrent demo — the visual that makes continuous batching click.[/]"
     )
 
 
@@ -743,7 +1054,11 @@ def main():
     console.print(render_model_info(model, models))
     console.print(f"[bold green]Active model:[/] [cyan]{model}[/]")
     console.print()
-    console.print("[dim]Type a message to chat, or /help for commands.[/]")
+    console.print(
+        "[dim]Type a message to chat, or [bold]/help[/] for commands.\n"
+        "  ★  Try [bold bright_magenta]/batch[/] to see the continuous batching "
+        "demo — the clearest way to understand what NIM does differently.[/]"
+    )
     console.print()
 
     # ── Chat state ────────────────────────────────────────────────────────────
@@ -828,6 +1143,10 @@ def main():
                                         border_style="green"))
                 else:
                     console.print("[yellow]GPU monitoring not available.[/]")
+                continue
+
+            elif cmd == "/batch":
+                run_batching_demo(client, model, gpu)
                 continue
 
             elif cmd == "/bench":
